@@ -1,0 +1,17 @@
+# MroyaFtrack Unreal plugin — Python dependencies
+#
+# Target: Unreal Engine embedded Python 3.11 (default in UE 5.x).
+# Install into this folder so the plugin can add it to sys.path:
+#
+#   python3.11 -m pip install -r requirements.txt -t .
+#
+# Or from repo root (path to this file):
+#
+#   python -m pip install -r Plugins/MroyaFtrack/dependencies/requirements.txt -t Plugins/MroyaFtrack/dependencies
+#
+# PySide6 is required for Qt UI; unreal-qt provides Unreal/PySide6 integration
+# (parenting windows, event loop). unreal-qt pulls in unreal-stylesheet and
+# importlib-metadata automatically.
+
+PySide6>=6.5.0
+unreal-qt>=0.0.3

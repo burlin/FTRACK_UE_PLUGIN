@@ -1,0 +1,18 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Mroya Ftrack",
+	"Description": "Ftrack browser and import integration. Plugin source lives in mroya; link this folder into your project's Plugins/ (see README.md).",
+	"Category": "Integration",
+	"CreatedBy": "Mroya",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": true,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [{"Name":"MroyaFtrack","Type":"Editor","LoadingPhase":"Default"}]
+}

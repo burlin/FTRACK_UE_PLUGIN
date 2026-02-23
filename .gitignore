@@ -1,0 +1,18 @@
+# Virtualenv (Python 3.11 for Unreal)
+.venv/
+venv/
+pip_list.txt
+
+# Installed dependencies; keep only requirements.txt and README in dependencies/
+dependencies/*
+!dependencies/.gitignore
+!dependencies/README.md
+!dependencies/requirements.txt
+
+# Unreal build artifacts
+Binaries/
+Intermediate/
+
+# Python cache
+__pycache__/
+*.pyc
