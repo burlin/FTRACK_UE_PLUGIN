@@ -29,6 +29,18 @@ _PLUGIN_ROOT = os.path.dirname(_THIS_DIR)
 _browser_widget_ref = None
 
 
+def _bring_browser_to_front(w) -> None:
+    """Deferred raise/activate so the window gets focus after the event loop processes the show."""
+    try:
+        if w is not None and getattr(w, "isVisible", lambda: False)():
+            w.raise_()
+            w.activateWindow()
+    except RuntimeError:
+        pass
+    except Exception:
+        pass
+
+
 def _bootstrap_paths() -> bool:
     """Add mroya and plugin paths to sys.path. Returns True if mroya root is set."""
     mroya_root = os.environ.get("MROYA_FTRACK_CONNECT", "").strip()
@@ -166,49 +178,53 @@ def open_browser() -> None:
     except Exception:
         pass
 
-    # Optional: direct import into Unreal when browser runs in-process (no menu step).
-    _import_callback = None
+    # Unreal: "Create Ftrack Handle" mode - browser Import button creates a handle; real import is in Ftrack Resources Control.
+    _create_handle_callback = None
     try:
         import init_ftrack_menu as _menu
-        import unreal as _unreal
-        _do_import = getattr(_menu, "import_paths_into_unreal", None)
-        if _do_import:
-            def _import_callback(paths, content_subpath=None):
-                n = _do_import(paths, content_subpath=content_subpath)
-                dest = ("/Game/" + content_subpath.strip().strip("/").replace("\\", "/")) if content_subpath and content_subpath.strip() else "/Game/FtrackImport"
-                try:
-                    _unreal.EditorDialog.show_message(
-                        "Import from Ftrack",
-                        "Imported %s asset(s) to %s." % (n, dest),
-                        _unreal.AppMsgType.OK,
-                        _unreal.AppReturnType.OK,
-                    )
-                except Exception:
-                    pass
-                return n
+        _create_handle = getattr(_menu, "create_ftrack_handle", None)
+        if _create_handle:
+            def _create_handle_callback(component_id, content_subpath=None, asset_version_id=None):
+                return _create_handle(component_id, content_subpath=content_subpath, asset_version_id=asset_version_id)
     except Exception:
         pass
 
-    # Reuse existing browser window if still open (second menu call brings it to front).
+    # Reuse existing browser window only if the widget is still valid (not destroyed by another panel/focus).
     if _browser_widget_ref is not None:
+        w = _browser_widget_ref
         try:
-            w = _browser_widget_ref
-            w.show()
-            w.raise_()
-            w.activateWindow()
-            try:
-                import unreal
-                unreal.log("Ftrack: Browser already open, brought to front.")
-            except ImportError:
-                pass
-            return
+            _ = w.isVisible()
         except RuntimeError:
+            w = None
             _browser_widget_ref = None
-        except Exception:
-            _browser_widget_ref = None
+        if w is not None:
+            try:
+                if QtCore is not None and hasattr(w, "isMinimized") and w.isMinimized():
+                    w.showNormal()
+                w.show()
+                w.raise_()
+                w.activateWindow()
+                if QApplication is not None:
+                    app = QApplication.instance()
+                    if app is not None:
+                        app.processEvents()
+                if QtCore is not None:
+                    QTimer = getattr(QtCore, "QTimer", None)
+                    if QTimer is not None:
+                        QTimer.singleShot(50, lambda: _bring_browser_to_front(w))
+                try:
+                    import unreal
+                    unreal.log("Ftrack: Browser already open, brought to front.")
+                except ImportError:
+                    pass
+                return
+            except RuntimeError:
+                _browser_widget_ref = None
+            except Exception:
+                _browser_widget_ref = None
 
     try:
-        widget = FtrackBrowser(on_import_to_unreal=_import_callback)
+        widget = FtrackBrowser(on_create_handle=_create_handle_callback)
         _browser_widget_ref = widget  # keep reference so widget is not GC'd when we return
         # unreal_qt.wrap() parents the widget to Unreal's window. It may do widget.close.connect(...).
         # In PySide6 QWidget has no close signal, so add one and emit it from closeEvent.
@@ -269,6 +285,102 @@ def open_browser() -> None:
             unreal.log_error("Ftrack (in-process): Failed to show browser: %s" % e)
         except ImportError:
             print("Ftrack: Failed to show browser: %s" % e, file=sys.stderr)
+
+
+def open_browser_embedded(parent_hwnd: int) -> bool:
+    """
+    Create FtrackBrowser and embed it inside the given native window (e.g. Unreal tab content).
+    parent_hwnd: Windows HWND (int) of the host window. The browser widget is parented to this via SetParent.
+    Returns True on success.
+    """
+    global _browser_widget_ref
+    if not _bootstrap_paths():
+        return False
+    os.environ["FTRACK_DCC"] = "unreal"
+    mroya_root = os.environ.get("MROYA_FTRACK_CONNECT", "").strip()
+    if mroya_root:
+        _load_dotenv(os.path.join(mroya_root, "config", ".env"))
+    try:
+        import unreal_qt
+        unreal_qt.setup()
+    except Exception:
+        return False
+    try:
+        import unreal
+        _root = logging.getLogger()
+        for h in _root.handlers[:]:
+            _root.removeHandler(h)
+        _root.addHandler(_UnrealLogHandler(unreal))
+        _root.setLevel(logging.DEBUG)
+        sys.stderr = _UnrealStderrWrapper(unreal)
+    except Exception:
+        pass
+    try:
+        from ftrack_inout.browser import FtrackBrowser
+    except ImportError:
+        return False
+    _import_callback = None
+    try:
+        import init_ftrack_menu as _menu
+        import unreal as _unreal
+        _do_import = getattr(_menu, "import_paths_into_unreal", None)
+        if _do_import:
+            def _import_callback(paths, content_subpath=None):
+                n = _do_import(paths, content_subpath=content_subpath)
+                dest = ("/Game/" + content_subpath.strip().strip("/").replace("\\", "/")) if content_subpath and content_subpath.strip() else "/Game/FtrackImport"
+                try:
+                    _unreal.EditorDialog.show_message("Import from Ftrack", "Imported %s asset(s) to %s." % (n, dest), _unreal.AppMsgType.OK, _unreal.AppReturnType.OK)
+                except Exception:
+                    pass
+                return n
+    except Exception:
+        pass
+    if QtCore is None or QApplication is None or QWidget is None:
+        return False
+    _create_handle_embedded = None
+    try:
+        import init_ftrack_menu as _menu
+        _create_handle = getattr(_menu, "create_ftrack_handle", None)
+        if _create_handle:
+            def _create_handle_embedded(cid, content_subpath=None, asset_version_id=None):
+                return _create_handle(cid, content_subpath=content_subpath, asset_version_id=asset_version_id)
+    except Exception:
+        pass
+    try:
+        widget = FtrackBrowser(on_create_handle=_create_handle_embedded)
+        _browser_widget_ref = widget
+        widget.setWindowFlags(QtCore.Qt.Widget)
+        widget.show()
+        if hasattr(widget, "winId"):
+            wid = int(widget.winId())
+            if wid and parent_hwnd:
+                try:
+                    import ctypes
+                    if sys.platform == "win32":
+                        ctypes.windll.user32.SetParent(wid, parent_hwnd)
+                        rect = ctypes.wintypes.RECT()
+                        if ctypes.windll.user32.GetClientRect(parent_hwnd, ctypes.byref(rect)):
+                            ctypes.windll.user32.MoveWindow(wid, 0, 0, rect.right - rect.left, rect.bottom - rect.top, 1)
+                except Exception as e:
+                    try:
+                        import unreal
+                        unreal.log_error("Ftrack (embedded) SetParent: %s" % e)
+                    except ImportError:
+                        pass
+                    return False
+        try:
+            import unreal
+            unreal.log("Ftrack: Browser embedded in tab.")
+        except ImportError:
+            pass
+        return True
+    except Exception as e:
+        try:
+            import unreal
+            unreal.log_error("Ftrack (embedded): %s" % e)
+        except ImportError:
+            pass
+        return False
 
 
 def _load_dotenv(path: str) -> None:

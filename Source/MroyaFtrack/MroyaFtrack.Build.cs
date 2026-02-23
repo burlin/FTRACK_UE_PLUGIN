@@ -17,6 +17,18 @@ public class MroyaFtrack : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
+			"Slate",
+			"SlateCore",
+			"EditorStyle",
+			"UnrealEd",
+			"LevelEditor",
+			"AssetRegistry",
+			"InputCore",
+			"Projects",
+			"ToolMenus",
+			"ContentBrowser",
+			"PythonScriptPlugin",
+			"Projects",
 		});
 	}
 }

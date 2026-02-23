@@ -26,6 +26,46 @@ ln -s /path/to/mroya/Plugins/MroyaFtrack /path/to/YourProject/Plugins/MroyaFtrac
 Copy this folder into your project: `YourProject/Plugins/MroyaFtrack`.  
 Updates require copying again from mroya.
 
+## Quick start (how to use)
+
+The plugin needs to know where the **mroya root** is (the folder that contains `ftrack_plugins/`, `tools/run_browser.py`, etc.). Set it via an environment variable.
+
+### 1. Set the mroya root (required)
+
+Create an environment variable **`MROYA_FTRACK_CONNECT`** and set it to the full path of the mroya root.
+
+**Windows (System):**
+- Win + R → `sysdm.cpl` → Advanced → Environment Variables.
+- Under "User variables" or "System variables", click New:  
+  **Name:** `MROYA_FTRACK_CONNECT`  
+  **Value:** `G:\mroya` (or your actual mroya path, e.g. `C:\repos\mroya`).
+- Confirm with OK. Restart Unreal Editor (and any launcher) so they see the new value.
+
+**Windows (current session only):**
+```cmd
+set MROYA_FTRACK_CONNECT=G:\mroya
+```
+Then start Unreal from this same command prompt.
+
+**Linux / macOS:**
+```bash
+export MROYA_FTRACK_CONNECT=/path/to/mroya
+```
+Or add this line to `~/.profile` or `~/.bashrc` for a permanent setting.
+
+### 2. Install the plugin
+
+- Place (or symlink) this folder into your project as `YourProject/Plugins/MroyaFtrack` (see Option 1 / Option 2 above).
+
+### 3. Enable and run
+
+1. **Edit → Plugins** → search for **"Mroya Ftrack"** → enable → restart if prompted.
+2. Ensure **Python Editor Script** is enabled (Edit → Plugins → Scripting).
+3. After restart, the **ftrack** menu appears in the main menu bar.
+4. **ftrack → Open browser** opens the Ftrack browser (in-process). Use the Import button in the browser to bring assets into the project.
+
+If the menu does not appear, see the "Usage" section below (startup scripts, Output Log).
+
 ## Layout
 
 - This folder is the plugin (and this repo). You can place it e.g. at `mroya/Plugins/MroyaFtrack` or anywhere else.
@@ -77,6 +117,6 @@ Installed packages (PySide6, unreal-qt) are in `.venv`; `dependencies/` is for U
 
 ## Environment
 
-When the plugin is used via **symlink**, Unreal sees the project path (e.g. `YourProject/Plugins/MroyaFtrack`), not the real mroya path, so the plugin cannot derive the mroya root from disk. Set the mroya root explicitly:
-
-- **`MROYA_FTRACK_CONNECT`** — mroya repo root (e.g. `G:\mroya`). The bootstrap script uses it to find `tools/run_browser.py` and run the browser. Set this in system env or in Connect launch so that Unreal (and the Python startup script) see it.
+- **`MROYA_FTRACK_CONNECT`** (required) — path to the **mroya root** (e.g. `G:\mroya`). The plugin uses it to find `tools/run_browser.py`, `ftrack_plugins/`, and related scripts. Without this variable, the **ftrack** menu may appear but "Open browser" will not work.
+- When the plugin is used via **symlink**, Unreal sees the project path (e.g. `YourProject/Plugins/MroyaFtrack`), not the real mroya path, so the plugin cannot guess the mroya root; you must set `MROYA_FTRACK_CONNECT` (see [Quick start](#quick-start-how-to-use) above).
+- Set it in system/user environment variables, or in the same shell/launcher from which you start Unreal, so that the editor process sees it.
