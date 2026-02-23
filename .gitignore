@@ -9,8 +9,7 @@ dependencies/*
 !dependencies/README.md
 !dependencies/requirements.txt
 
-# Unreal build artifacts
-Binaries/
+# Unreal build artifacts (Binaries committed for distribution)
 Intermediate/
 
 # Python cache
