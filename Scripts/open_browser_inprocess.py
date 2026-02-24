@@ -134,9 +134,21 @@ def open_browser() -> None:
     if mroya_root:
         _load_dotenv(os.path.join(mroya_root, "config", ".env"))
 
+    # dependencies/ relative to plugin root (works with symlink: project points to dev folder)
+    deps_dir = os.path.join(_PLUGIN_ROOT, "dependencies")
     try:
         import unreal_qt
         unreal_qt.setup()
+    except ImportError:
+        try:
+            import unreal
+            unreal.log_error(
+                "Ftrack (in-process): unreal_qt not found. "
+                "From plugin root run: py -3.11 -m pip install -r requirements.txt -t dependencies"
+            )
+        except ImportError:
+            print("Ftrack: unreal_qt not found. From plugin root run: pip install -r requirements.txt -t dependencies", file=sys.stderr)
+        return
     except Exception as e:
         try:
             import unreal
