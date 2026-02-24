@@ -104,16 +104,14 @@ If your Unreal version uses a different path for `UPrimaryDataAsset`, change the
 
 ## Development setup (Python)
 
-Use Python 3.11 (same as Unreal 5) and a local venv:
+The plugin loads PySide6 and unreal-qt from **`dependencies/`**. Install there (no .venv required):
 
 ```cmd
 cd Plugins\MroyaFtrack
-py -3.11 -m venv .venv
-.venv\Scripts\activate
-pip install -r dependencies\requirements.txt
+py -3.11 -m pip install -r dependencies\requirements.txt -t dependencies
 ```
 
-Installed packages (PySide6, unreal-qt) are in `.venv`; `dependencies/` is for Unreal's sys.path when running in-editor. The repo ignores `.venv` and installed content in `dependencies/` (see `.gitignore`).
+Unreal's in-editor Python will use `dependencies/` via sys.path. The repo ignores installed content in `dependencies/` (see `.gitignore`). For local testing outside Unreal you can use a venv and the same `requirements.txt`.
 
 ## Environment
 

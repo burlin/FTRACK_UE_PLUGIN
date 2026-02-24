@@ -29,12 +29,12 @@ def _bootstrap_paths() -> bool:
     plugins_root = os.path.join(mroya_root, "ftrack_plugins")
     inout_deps = os.path.join(plugins_root, "ftrack_inout", "dependencies")
     multi_site_deps = os.path.join(plugins_root, "multi-site-location-0.2.0", "dependencies")
-    venv_site = os.path.join(_PLUGIN_ROOT, ".venv", "Lib", "site-packages")
+    deps_dir = os.path.join(_PLUGIN_ROOT, "dependencies")
     for label, p in [
         ("ftrack_plugins", plugins_root),
         ("inout deps", inout_deps),
         ("multi-site deps", multi_site_deps),
-        (".venv", venv_site),
+        ("dependencies", deps_dir),
     ]:
         if os.path.isdir(p) and p not in sys.path:
             sys.path.insert(0, p)

@@ -3,7 +3,7 @@
 Launch the Ftrack browser in-process inside Unreal (same process as the editor).
 
 Requires MROYA_FTRACK_CONNECT to point to the mroya root. Adds mroya ftrack_plugins
-and this plugin's .venv to sys.path, sets FTRACK_DCC=unreal, then creates and shows
+and this plugin's dependencies/ to sys.path, sets FTRACK_DCC=unreal, then creates and shows
 FtrackBrowser. Uses unreal_qt so the window is parented to the Unreal editor.
 """
 
@@ -65,10 +65,10 @@ def _bootstrap_paths() -> bool:
     if os.path.isdir(multi_site_deps) and multi_site_deps not in sys.path:
         paths_to_add.append(multi_site_deps)
 
-    # Plugin .venv site-packages (PySide6, unreal_qt)
-    venv_site = os.path.join(_PLUGIN_ROOT, ".venv", "Lib", "site-packages")
-    if os.path.isdir(venv_site) and venv_site not in sys.path:
-        paths_to_add.append(venv_site)
+    # Plugin dependencies (PySide6, unreal_qt; install with: pip install -r requirements.txt -t dependencies)
+    deps_dir = os.path.join(_PLUGIN_ROOT, "dependencies")
+    if os.path.isdir(deps_dir) and deps_dir not in sys.path:
+        paths_to_add.append(deps_dir)
 
     for p in paths_to_add:
         sys.path.insert(0, p)
