@@ -152,10 +152,19 @@ def open_browser() -> None:
 
     os.environ["FTRACK_DCC"] = "unreal"
 
-    # Optional: load .env from mroya config
-    mroya_root = os.environ.get("MROYA_FTRACK_CONNECT", "").strip()
-    if mroya_root:
-        _load_dotenv(os.path.join(mroya_root, "config", ".env"))
+    # Load credentials: Ftrack Connect config.json first, then .env
+    try:
+        from pathlib import Path
+        from ftrack_inout.common.credentials_loader import load_ftrack_credentials_into_env
+        mroya_root = os.environ.get("MROYA_FTRACK_CONNECT", "").strip()
+        dotenv_paths = []
+        if mroya_root:
+            dotenv_paths = [Path(mroya_root) / "config" / ".env", Path(mroya_root) / ".env"]
+        load_ftrack_credentials_into_env(prefer_connect=True, dotenv_paths=dotenv_paths)
+    except ImportError:
+        mroya_root = os.environ.get("MROYA_FTRACK_CONNECT", "").strip()
+        if mroya_root:
+            _load_dotenv(os.path.join(mroya_root, "config", ".env"))
 
     # dependencies/ relative to plugin root (works with symlink: project points to dev folder)
     deps_dir = os.path.join(_PLUGIN_ROOT, "dependencies")
