@@ -30,11 +30,34 @@ _browser_widget_ref = None
 
 
 def _bring_browser_to_front(w) -> None:
-    """Deferred raise/activate so the window gets focus after the event loop processes the show."""
+    """Deferred: restore from minimized and bring window to front."""
     try:
-        if w is not None and getattr(w, "isVisible", lambda: False)():
+        if w is None:
+            return
+        if getattr(w, "isMinimized", lambda: False)():
+            w.showNormal()
+        w.show()
+        if QtCore is not None:
             w.raise_()
             w.activateWindow()
+        if QApplication is not None:
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                tl = w.window() if hasattr(w, "window") else w
+                hwnd = int(tl.winId()) if hasattr(tl, "winId") and tl.winId() else 0
+                if hwnd:
+                    SWP_SHOWWINDOW, SWP_NOMOVE, SWP_NOSIZE = 0x0040, 0x0002, 0x0001
+                    HWND_TOP, GA_ROOT = 0, 2
+                    ctypes.windll.user32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE)
+                    root = ctypes.windll.user32.GetAncestor(hwnd, GA_ROOT)
+                    fg = root if (root and root != hwnd) else hwnd
+                    ctypes.windll.user32.SetForegroundWindow(fg)
+            except Exception:
+                pass
     except RuntimeError:
         pass
     except Exception:
@@ -223,7 +246,7 @@ def open_browser() -> None:
                 if QtCore is not None:
                     QTimer = getattr(QtCore, "QTimer", None)
                     if QTimer is not None:
-                        QTimer.singleShot(50, lambda: _bring_browser_to_front(w))
+                        QTimer.singleShot(250, lambda: _bring_browser_to_front(w))
                 try:
                     import unreal
                     unreal.log("Ftrack: Browser already open, brought to front.")
@@ -238,6 +261,12 @@ def open_browser() -> None:
     try:
         widget = FtrackBrowser(on_create_handle=_create_handle_callback)
         _browser_widget_ref = widget  # keep reference so widget is not GC'd when we return
+        try:
+            import unreal_qt as _uq
+            if hasattr(_uq, "exclude_from_parenting"):
+                _uq.exclude_from_parenting(widget)
+        except Exception:
+            pass
         # unreal_qt.wrap() parents the widget to Unreal's window. It may do widget.close.connect(...).
         # In PySide6 QWidget has no close signal, so add one and emit it from closeEvent.
         if QtCore is not None and QWidget is not None:
@@ -264,9 +293,7 @@ def open_browser() -> None:
             pass
         if QtCore is not None:
             try:
-                widget.setWindowFlags(
-                    widget.windowFlags() | QtCore.Qt.Window | QtCore.Qt.WindowStaysOnTopHint
-                )
+                widget.setWindowFlags(widget.windowFlags() | QtCore.Qt.Window)
                 widget.setMinimumSize(900, 600)
                 widget.resize(1000, 700)
             except Exception:
@@ -291,6 +318,18 @@ def open_browser() -> None:
             unreal.log("Ftrack: Browser opened in-process.")
         except ImportError:
             pass
+    except TypeError as e:
+        if "on_create_handle" in str(e):
+            try:
+                import unreal
+                unreal.log_error(
+                    "Ftrack (in-process): Browser version is too old. "
+                    "Update mroya ftrack_plugins (browser) to a version that supports on_create_handle."
+                )
+            except ImportError:
+                print("Ftrack: Update mroya ftrack_plugins browser (on_create_handle not supported).", file=sys.stderr)
+        else:
+            raise
     except Exception as e:
         try:
             import unreal

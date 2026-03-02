@@ -193,10 +193,28 @@ def _open_browser_inprocess() -> None:
             print("Ftrack: Failed to open browser: %s" % e, file=sys.stderr)
 
 
+def _warm_shared_session() -> None:
+    """Bootstrap mroya paths and create shared session early so browser/Import are fast."""
+    if not _bootstrap_mroya():
+        return
+    try:
+        from ftrack_inout.common.session_factory import get_shared_session
+        session = get_shared_session()
+        if unreal:
+            if session:
+                unreal.log("Ftrack: Shared session ready.")
+            else:
+                unreal.log_warning("Ftrack: Shared session creation returned None (check FTRACK_* env).")
+    except Exception as e:
+        if unreal:
+            unreal.log_warning("Ftrack: Could not warm shared session: %s" % e)
+
+
 def register_ftrack_menu() -> None:
     """Add Ftrack menu to the Level Editor main menu."""
     if unreal is None:
         return
+    _warm_shared_session()
     menus = unreal.ToolMenus.get()
     main_menu = menus.find_menu("LevelEditor.MainMenu")
     if not main_menu:

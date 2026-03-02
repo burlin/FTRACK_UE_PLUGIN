@@ -12,6 +12,7 @@ import os
 import sys
 import traceback
 
+
 def _log(msg):
     try:
         import unreal
