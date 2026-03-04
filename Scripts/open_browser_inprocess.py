@@ -150,8 +150,6 @@ def open_browser() -> None:
             print("Ftrack: MROYA_FTRACK_CONNECT not set or invalid.", file=sys.stderr)
         return
 
-    os.environ["FTRACK_DCC"] = "unreal"
-
     # Load credentials: Ftrack Connect config.json first, then .env
     try:
         from pathlib import Path
@@ -268,7 +266,8 @@ def open_browser() -> None:
                 _browser_widget_ref = None
 
     try:
-        widget = FtrackBrowser(on_create_handle=_create_handle_callback)
+        # Explicitly pass DCC identifier so browser can apply Unreal-specific behavior and filters.
+        widget = FtrackBrowser(on_create_handle=_create_handle_callback, dcc="unreal")
         _browser_widget_ref = widget  # keep reference so widget is not GC'd when we return
         try:
             import unreal_qt as _uq
@@ -349,14 +348,17 @@ def open_browser() -> None:
 
 def open_browser_embedded(parent_hwnd: int) -> bool:
     """
-    Create FtrackBrowser and embed it inside the given native window (e.g. Unreal tab content).
+    Experimental: try to create FtrackBrowser and embed it inside the given native window (e.g. Unreal tab content).
+
+    NOTE: This code path is currently not production ready and is kept for future experiments with true in-tab embedding.
+    In practice, only open_browser() (separate window via unreal_qt) is considered stable and supported.
+
     parent_hwnd: Windows HWND (int) of the host window. The browser widget is parented to this via SetParent.
     Returns True on success.
     """
     global _browser_widget_ref
     if not _bootstrap_paths():
         return False
-    os.environ["FTRACK_DCC"] = "unreal"
     mroya_root = os.environ.get("MROYA_FTRACK_CONNECT", "").strip()
     if mroya_root:
         _load_dotenv(os.path.join(mroya_root, "config", ".env"))
@@ -407,7 +409,8 @@ def open_browser_embedded(parent_hwnd: int) -> bool:
     except Exception:
         pass
     try:
-        widget = FtrackBrowser(on_create_handle=_create_handle_embedded)
+        # Explicitly pass DCC identifier so browser can apply Unreal-specific behavior and filters.
+        widget = FtrackBrowser(on_create_handle=_create_handle_embedded, dcc="unreal")
         _browser_widget_ref = widget
         widget.setWindowFlags(QtCore.Qt.Widget)
         widget.show()

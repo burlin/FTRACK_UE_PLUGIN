@@ -91,9 +91,9 @@ def run_test() -> None:
         traceback.print_exc()
         return
 
-    print("[test] Creating FtrackBrowser()...")
+    print("[test] Creating FtrackBrowser(dcc='unreal')...")
     try:
-        widget = FtrackBrowser()
+        widget = FtrackBrowser(dcc="unreal")
         print("[test] widget=%s, class=%s" % (widget, type(widget).__name__))
         print("[test] widget.parent()=%s" % widget.parent())
         print("[test] hasattr(widget,'close')=%s, type(widget.close)=%s" % (hasattr(widget, "close"), type(getattr(widget, "close", None))))
