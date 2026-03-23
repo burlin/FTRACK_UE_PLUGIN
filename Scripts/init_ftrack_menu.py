@@ -178,6 +178,32 @@ def import_paths_into_unreal(paths: list, content_subpath: str | None = None) ->
     return imported
 
 
+def _open_project_publisher() -> None:
+    """Open the Project Publisher window. Reloads publisher scripts on every call for live development."""
+    import importlib
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    if this_dir not in sys.path:
+        sys.path.insert(0, this_dir)
+    # Reload publisher scripts so edits take effect without restarting Unreal.
+    # init_ftrack_menu and open_browser_inprocess are intentionally excluded:
+    # they register @unreal.uclass() entries that must not be re-registered mid-session.
+    for _mod in ("ftrack_out_handle", "project_publisher_ui"):
+        if _mod in sys.modules:
+            try:
+                importlib.reload(sys.modules[_mod])
+            except Exception as _e:
+                if unreal:
+                    unreal.log_warning("Ftrack: Could not reload %s: %s" % (_mod, _e))
+    try:
+        import project_publisher_ui
+        project_publisher_ui.open_project_publisher()
+    except Exception as e:
+        if unreal:
+            unreal.log_error("Ftrack: Failed to open Project Publisher: %s" % e)
+        else:
+            print("Ftrack: Failed to open Project Publisher: %s" % e, file=sys.stderr)
+
+
 def _open_browser_inprocess() -> None:
     """Launch Ftrack browser in-process (same process as Unreal, window parented to editor)."""
     this_dir = os.path.dirname(os.path.abspath(__file__))
@@ -229,6 +255,28 @@ def register_ftrack_menu() -> None:
     )
 
     @unreal.uclass()
+    class ProjectPublisherEntryScript(unreal.ToolMenuEntryScript):
+        @unreal.ufunction(override=True)
+        def get_label(self, context):
+            return "Project Publisher"
+
+        @unreal.ufunction(override=True)
+        def get_tool_tip(self, context):
+            return "Open the Project Publisher to create and manage publish nodes."
+
+        @unreal.ufunction(override=True)
+        def execute(self, context):
+            _open_project_publisher()
+
+    entry_publisher = unreal.ToolMenuEntry(
+        name="FtrackProjectPublisher",
+        type=unreal.MultiBlockType.MENU_ENTRY,
+        script_object=ProjectPublisherEntryScript(),
+    )
+
+    ftrack_menu.add_menu_entry("FtrackActions", entry_publisher)
+
+    @unreal.uclass()
     class OpenBrowserEntryScript(unreal.ToolMenuEntryScript):
         @unreal.ufunction(override=True)
         def get_label(self, context):
@@ -250,7 +298,7 @@ def register_ftrack_menu() -> None:
 
     ftrack_menu.add_menu_entry("FtrackActions", entry_open)
     menus.refresh_all_widgets()
-    unreal.log("Ftrack: Menu registered (Ftrack -> Open browser).")
+    unreal.log("Ftrack: Menu registered (Ftrack -> Project Publisher, Open browser).")
 
 
 if __name__ == "__main__":
