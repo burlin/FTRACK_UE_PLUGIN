@@ -104,7 +104,7 @@ If your Unreal version uses a different path for `UPrimaryDataAsset`, change the
 
 ### Ftrack Out Handle (publish payload)
 
-`UFtrackOutHandle` is a **DataAsset** that stores passive data for the `ftrack_inout` publisher (same shape as `PublishJob` / `ComponentData` under `ftrack_plugins/ftrack_inout/publisher`). On each component it can also store a **soft reference to a UE object**, a **scenario library index** (integer), and an optional scenario description. The plugin does not run scenario code; your pipeline fills the asset (often from an external script), then on export runs the chosen scenario per component to write files under the paths stored in the handle, and finally calls `Publisher.execute(job)` with a job built from the same handle.
+`UFtrackOutHandle` is a **DataAsset** that stores passive data for the `ftrack_inout` publisher (same shape as `PublishJob` / `ComponentData` under `ftrack_plugins/ftrack_inout/publisher`). On each component it can also store a **path string to the UE object to export** (`SourceObjectPath`: e.g. soft path, sequencer binding, camera in a sequence), a **scenario library index** (integer), and an optional scenario description. The plugin does not run scenario code; your pipeline fills the asset (often from an external script), then on export runs the chosen scenario per component to write files under the paths stored in the handle, and finally calls `Publisher.execute(job)` with a job built from the same handle.
 
 From Python, ensure `ftrack_inout` is importable (same as the Task Hub browser: set **`MROYA_FTRACK_CONNECT`** to the mroya root and add `mroya/ftrack_plugins` to `sys.path` if needed). Then:
 
@@ -117,7 +117,7 @@ from ftrack_inout.publisher.core import PublishJob, Publisher, JobBuilder
 # Publisher(session).execute(job)
 ```
 
-`out_handle_to_publish_job_dict` maps the asset to a dict for `PublishJob.from_dict`. If `include_unreal_metadata=True`, optional keys such as `scenario_library_index` and `unreal_source_object` are merged into each component’s `metadata` for traceability in ftrack.
+`out_handle_to_publish_job_dict` maps the asset to a dict for `PublishJob.from_dict`. If `include_unreal_metadata=True`, optional keys such as `scenario_library_index` and `unreal_source_object` (value is `SourceObjectPath`) are merged into each component’s `metadata` for traceability in ftrack.
 
 ## Development setup (Python)
 

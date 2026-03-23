@@ -2,7 +2,7 @@
 """
 Ftrack Out Handle: read UFtrackOutHandle into a dict for PublishJob.from_dict / Publisher.execute.
 
-UE-only fields (SourceObject, ScenarioLibraryIndex) are omitted from the dict by default;
+UE-only fields (SourceObjectPath, ScenarioLibraryIndex) are omitted from the dict by default;
 set include_unreal_metadata=True to add optional keys under metadata for tracing.
 """
 
@@ -104,10 +104,13 @@ def _entry_to_component_dict(
         desc = (_get_prop(entry, "ScenarioDescription", "scenario_description") or "").strip()
         if desc:
             meta.setdefault("scenario_description", desc)
-        src = _get_prop(entry, "SourceObject", "source_object")
-        p = _soft_object_to_path_str(src)
-        if p:
-            meta.setdefault("unreal_source_object", p)
+        path_str = (_get_prop(entry, "SourceObjectPath", "source_object_path") or "").strip()
+        if not path_str:
+            # Backward compatibility: older assets used TSoftObjectPtr SourceObject
+            src = _get_prop(entry, "SourceObject", "source_object")
+            path_str = _soft_object_to_path_str(src)
+        if path_str:
+            meta.setdefault("unreal_source_object", path_str)
 
     comp: Dict[str, Any] = {
         "name": str(name),
