@@ -32,18 +32,21 @@ def _bootstrap_paths() -> None:
 
 
 def open_project_publisher() -> None:
-    """Open the Project Publisher window. Reuses existing window if already open."""
+    """Open the Project Publisher window, closing any stale window from a previous module load."""
     global _publisher_window
     _bootstrap_paths()
 
-    if _publisher_window is not None:
-        try:
-            if _publisher_window.isVisible():
-                _publisher_window.raise_()
-                _publisher_window.activateWindow()
-                return
-        except Exception:
-            _publisher_window = None
+    # Close any window that survived a module reload (reference stored on the unreal module
+    # so it persists across reloads of this file; stale windows carry old class closures).
+    if unreal:
+        for _stale in getattr(unreal, "_mroya_publisher_windows", []):
+            try:
+                _stale.hide()
+            except Exception:
+                pass
+        unreal._mroya_publisher_windows = []
+
+    _publisher_window = None
 
     try:
         import unreal_qt
@@ -63,8 +66,10 @@ def open_project_publisher() -> None:
             self.asset_name = asset_name
             self.asset_path = asset_path
             self.setWindowTitle("Setup Publisher — %s" % asset_name)
-            self.setMinimumWidth(300)
+            self.setMinimumWidth(380)
+            self.resize(420, 340)
             self._build_ui()
+            self._load_existing_components()
 
         def _build_ui(self):
             layout = QtWidgets.QVBoxLayout(self)
@@ -72,9 +77,17 @@ def open_project_publisher() -> None:
             layout.setSpacing(8)
 
             self.btn_mark = QtWidgets.QPushButton("Mark for Publish")
+            self.btn_mark.clicked.connect(self._on_mark_for_publish)
             layout.addWidget(self.btn_mark)
 
-            layout.addStretch()
+            # List of objects marked for publish
+            self.marked_list = QtWidgets.QListWidget()
+            self.marked_list.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
+            layout.addWidget(self.marked_list, stretch=1)
+
+            self.btn_remove = QtWidgets.QPushButton("Remove from Publish")
+            self.btn_remove.clicked.connect(self._on_remove_from_publish)
+            layout.addWidget(self.btn_remove)
 
             btn_row = QtWidgets.QHBoxLayout()
             self.btn_ok = QtWidgets.QPushButton("OK")
@@ -83,6 +96,151 @@ def open_project_publisher() -> None:
             btn_row.addWidget(self.btn_ok)
             btn_row.addWidget(self.btn_close)
             layout.addLayout(btn_row)
+
+        def _load_existing_components(self):
+            """Read Components already stored in the DataAsset and populate the list."""
+            if not unreal:
+                return
+            try:
+                asset = unreal.load_asset(self.asset_path)
+                if not asset:
+                    return
+                components = list(asset.get_editor_property("Components") or [])
+                for c in components:
+                    try:
+                        object_id = c.get_editor_property("Name") or ""
+                        if not object_id:
+                            continue
+                        component_type = ""
+                        try:
+                            component_type = c.get_editor_property("ComponentType") or ""
+                        except Exception:
+                            pass
+                        # Derive a readable label from the stored path
+                        # Actor paths:  /Game/Maps/L.L:PersistentLevel.MyCam  → "MyCam"
+                        # Asset paths:  /Game/Meshes/Rock.Rock                → "Rock"
+                        short = object_id.split(".")[-1] if "." in object_id else object_id.split("/")[-1]
+                        label = "%s  (%s)" % (short, component_type) if component_type else short
+                        self._add_marked_item(label, object_id)
+                    except Exception:
+                        pass
+            except Exception as e:
+                unreal.log_warning("Ftrack: Could not load existing components: %s" % e)
+
+        def _on_mark_for_publish(self):
+            if not unreal:
+                return
+            added = 0
+
+            # Collect content browser assets and level actors separately so we
+            # can apply the sequencer filter before adding anything.
+            content_assets = []
+            try:
+                content_assets = unreal.EditorUtilityLibrary.get_selected_assets() or []
+            except Exception as e:
+                unreal.log_warning("Ftrack: Could not get selected assets: %s" % e)
+
+            actors = []
+            try:
+                try:
+                    actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_selected_level_actors() or []
+                except Exception:
+                    actors = unreal.EditorLevelLibrary.get_selected_level_actors() or []
+            except Exception as e:
+                unreal.log_warning("Ftrack: Could not get selected actors: %s" % e)
+
+            # When a camera (or any actor) is selected inside the Sequencer, the open
+            # LevelSequence asset also appears in the content browser selection — drop it
+            # so only the actual actor is added, not the sequence document.
+            if actors:
+                level_seq_cls = getattr(unreal, "LevelSequence", None)
+                if level_seq_cls:
+                    content_assets = [a for a in content_assets if not isinstance(a, level_seq_cls)]
+
+            for asset in content_assets:
+                object_id = unreal.SystemLibrary.get_path_name(asset)
+                label = "%s  (%s)" % (unreal.SystemLibrary.get_object_name(asset), type(asset).__name__)
+                if self._write_component_to_asset(object_id):
+                    self._add_marked_item(label, object_id)
+                    added += 1
+
+            cine_cam_cls = getattr(unreal, "CineCameraActor", None)
+            for actor in actors:
+                object_id = unreal.SystemLibrary.get_path_name(actor)
+                label = "%s  (%s)" % (actor.get_actor_label(), type(actor).__name__)
+                is_camera = cine_cam_cls and isinstance(actor, cine_cam_cls)
+                component_type = "camera" if is_camera else ""
+                if self._write_component_to_asset(object_id, component_type=component_type):
+                    self._add_marked_item(label, object_id)
+                    added += 1
+
+            if added == 0:
+                unreal.log_warning("Ftrack: Nothing selected — select assets in the Content Browser or actors in the viewport.")
+            else:
+                unreal.log("Ftrack: Marked %d object(s) for publish." % added)
+
+        def _on_remove_from_publish(self):
+            for item in self.marked_list.selectedItems():
+                object_id = item.data(QtCore.Qt.ItemDataRole.UserRole)
+                self._remove_component_from_asset(object_id)
+                self.marked_list.takeItem(self.marked_list.row(item))
+
+        def _write_component_to_asset(self, object_id: str, component_type: str = "") -> bool:
+            """Append a new FFtrackPublishComponentEntry to the DataAsset. Returns True on success."""
+            try:
+                asset = unreal.load_asset(self.asset_path)
+                if not asset:
+                    unreal.log_error("Ftrack: Could not load DataAsset: %s" % self.asset_path)
+                    return False
+                components = list(asset.get_editor_property("Components") or [])
+                # Skip if already present
+                for c in components:
+                    try:
+                        if c.get_editor_property("Name") == object_id:
+                            return True
+                    except Exception:
+                        pass
+                entry = unreal.FtrackPublishComponentEntry()
+                entry.set_editor_property("Name", object_id)
+                if component_type:
+                    entry.set_editor_property("ComponentType", component_type)
+                components.append(entry)
+                asset.set_editor_property("Components", components)
+                unreal.EditorAssetLibrary.save_loaded_asset(asset)
+                return True
+            except Exception as e:
+                unreal.log_error("Ftrack: Failed to write component to DataAsset: %s" % e)
+                return False
+
+        def _remove_component_from_asset(self, object_id: str) -> None:
+            """Remove the FFtrackPublishComponentEntry with Name=object_id from the DataAsset."""
+            try:
+                asset = unreal.load_asset(self.asset_path)
+                if not asset:
+                    return
+                components = list(asset.get_editor_property("Components") or [])
+                filtered = []
+                for c in components:
+                    try:
+                        if c.get_editor_property("Name") == object_id:
+                            continue
+                    except Exception:
+                        pass
+                    filtered.append(c)
+                if len(filtered) != len(components):
+                    asset.set_editor_property("Components", filtered)
+                    unreal.EditorAssetLibrary.save_loaded_asset(asset)
+            except Exception as e:
+                unreal.log_error("Ftrack: Failed to remove component from DataAsset: %s" % e)
+
+        def _add_marked_item(self, label, path):
+            """Add item to the list, skipping duplicates."""
+            for i in range(self.marked_list.count()):
+                if self.marked_list.item(i).data(QtCore.Qt.ItemDataRole.UserRole) == path:
+                    return
+            item = QtWidgets.QListWidgetItem(label)
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, path)
+            self.marked_list.addItem(item)
 
     class ProjectPublisherWindow(QtWidgets.QWidget):
         def __init__(self):
@@ -213,3 +371,5 @@ def open_project_publisher() -> None:
     win.raise_()
     win.activateWindow()
     _publisher_window = win
+    if unreal:
+        unreal._mroya_publisher_windows = [win]
