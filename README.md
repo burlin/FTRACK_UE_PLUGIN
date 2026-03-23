@@ -69,7 +69,7 @@ If the menu does not appear, see the "Usage" section below (startup scripts, Out
 ## Layout
 
 - This folder is the plugin (and this repo). You can place it e.g. at `mroya/Plugins/MroyaFtrack` or anywhere else.
-- **Source/MroyaFtrack/** — C++ module: `UFtrackAssetHandle` (DataAsset) for the "handle" workflow (store component ID, load/re-import later). Requires compiling the project in Unreal (right-click .uproject -> Generate Visual Studio project files, then Build).
+- **Source/MroyaFtrack/** — C++ module: `UFtrackAssetHandle` (import handle) and `UFtrackOutHandle` (publish payload DataAsset). Requires compiling the project in Unreal (right-click .uproject -> Generate Visual Studio project files, then Build).
 - Ftrack Connect integration and browser launcher live in the mroya tree: `ftrack_plugins/ftrack_framework_unreal-0.0.0/`, `tools/run_browser.py`. Set `MROYA_FTRACK_CONNECT` to the mroya root so the plugin can find them.
 
 ## Usage
@@ -101,6 +101,23 @@ Then:
 3. After the first successful build, the **FtrackAssetHandle** class is available: create a Blueprint or DataAsset based on it in Content Browser, or create it from Python.
 
 If your Unreal version uses a different path for `UPrimaryDataAsset`, change the include in `Source/MroyaFtrack/Public/FtrackAssetHandle.h` (e.g. to `Engine/DataAsset.h` and inherit from `UDataAsset` if needed).
+
+### Ftrack Out Handle (publish payload)
+
+`UFtrackOutHandle` is a **DataAsset** that stores passive data for the `ftrack_inout` publisher (same shape as `PublishJob` / `ComponentData` under `ftrack_plugins/ftrack_inout/publisher`). On each component it can also store a **soft reference to a UE object**, a **scenario library index** (integer), and an optional scenario description. The plugin does not run scenario code; your pipeline fills the asset (often from an external script), then on export runs the chosen scenario per component to write files under the paths stored in the handle, and finally calls `Publisher.execute(job)` with a job built from the same handle.
+
+From Python, ensure `ftrack_inout` is importable (same as the Task Hub browser: set **`MROYA_FTRACK_CONNECT`** to the mroya root and add `mroya/ftrack_plugins` to `sys.path` if needed). Then:
+
+```python
+from ftrack_out_handle import out_handle_to_publish_job_dict, create_ftrack_out_handle
+from ftrack_inout.publisher.core import PublishJob, Publisher, JobBuilder
+
+# job_dict = out_handle_to_publish_job_dict("/Game/Path/FtrackOutHandle", include_unreal_metadata=False)
+# job = JobBuilder.from_dict(job_dict)  # or PublishJob.from_dict(job_dict)
+# Publisher(session).execute(job)
+```
+
+`out_handle_to_publish_job_dict` maps the asset to a dict for `PublishJob.from_dict`. If `include_unreal_metadata=True`, optional keys such as `scenario_library_index` and `unreal_source_object` are merged into each component’s `metadata` for traceability in ftrack.
 
 ## Development setup (Python)
 
