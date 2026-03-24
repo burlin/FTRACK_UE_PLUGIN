@@ -91,11 +91,15 @@ def open_project_publisher() -> None:
 
             btn_row = QtWidgets.QHBoxLayout()
             self.btn_ok = QtWidgets.QPushButton("OK")
+            self.btn_ok.clicked.connect(self._on_ok)
             self.btn_close = QtWidgets.QPushButton("Close")
             self.btn_close.clicked.connect(self.close)
             btn_row.addWidget(self.btn_ok)
             btn_row.addWidget(self.btn_close)
             layout.addLayout(btn_row)
+
+        def _on_ok(self):
+            self.close()
 
         def _load_existing_components(self):
             """Read Components already stored in the DataAsset and populate the list."""
@@ -164,13 +168,36 @@ def open_project_publisher() -> None:
                     self._add_marked_item(label, object_id)
                     added += 1
 
+            # Record the currently open sequence so export doesn't need to scan
+            seq_path = ""
+            try:
+                seq = unreal.LevelSequenceEditorBlueprintLibrary.get_current_level_sequence()
+                if seq:
+                    seq_path = unreal.SystemLibrary.get_path_name(seq)
+            except Exception:
+                pass
+
             cine_cam_cls = getattr(unreal, "CineCameraActor", None)
             for actor in actors:
                 object_id = unreal.SystemLibrary.get_path_name(actor)
-                label = "%s  (%s)" % (actor.get_actor_label(), type(actor).__name__)
+                actor_label = actor.get_actor_label()
+                label = "%s  (%s)" % (actor_label, type(actor).__name__)
                 is_camera = cine_cam_cls and isinstance(actor, cine_cam_cls)
                 component_type = "camera" if is_camera else ""
-                if self._write_component_to_asset(object_id, component_type=component_type):
+                cam_label = actor_label if is_camera else ""
+                # For cameras, record the sequencer binding GUID so export can
+                # find the binding by stable ID rather than by name.
+                binding_guid = ""
+                if is_camera and seq:
+                    try:
+                        for b in (seq.get_bindings() or []):
+                            if b.get_name() == actor_label:
+                                g = b.get_id()
+                                binding_guid = "%08X-%08X-%08X-%08X" % (g.a, g.b, g.c, g.d)
+                                break
+                    except Exception:
+                        pass
+                if self._write_component_to_asset(object_id, component_type=component_type, sequence_path=seq_path, actor_label=cam_label, binding_guid=binding_guid):
                     self._add_marked_item(label, object_id)
                     added += 1
 
@@ -185,7 +212,7 @@ def open_project_publisher() -> None:
                 self._remove_component_from_asset(object_id)
                 self.marked_list.takeItem(self.marked_list.row(item))
 
-        def _write_component_to_asset(self, object_id: str, component_type: str = "") -> bool:
+        def _write_component_to_asset(self, object_id: str, component_type: str = "", sequence_path: str = "", actor_label: str = "", binding_guid: str = "") -> bool:
             """Append a new FFtrackPublishComponentEntry to the DataAsset. Returns True on success."""
             try:
                 asset = unreal.load_asset(self.asset_path)
@@ -204,6 +231,15 @@ def open_project_publisher() -> None:
                 entry.set_editor_property("Name", object_id)
                 if component_type:
                     entry.set_editor_property("ComponentType", component_type)
+                metadata = {}
+                if sequence_path:
+                    metadata["sequence_path"] = sequence_path
+                if actor_label:
+                    metadata["actor_label"] = actor_label
+                if binding_guid:
+                    metadata["binding_guid"] = binding_guid
+                if metadata:
+                    entry.set_editor_property("Metadata", metadata)
                 components.append(entry)
                 asset.set_editor_property("Components", components)
                 unreal.EditorAssetLibrary.save_loaded_asset(asset)
@@ -308,6 +344,14 @@ def open_project_publisher() -> None:
                     btn.setFixedWidth(120)
                     btn.clicked.connect(lambda checked=False, n=name, p=path: self._open_setup_publisher(n, p))
                     row_layout.addWidget(btn)
+                    btn_pub = QtWidgets.QPushButton("Publish")
+                    btn_pub.setFixedWidth(70)
+                    btn_pub.clicked.connect(lambda checked=False, p=path: self._publish_asset(p))
+                    row_layout.addWidget(btn_pub)
+                    btn_del = QtWidgets.QPushButton("Delete")
+                    btn_del.setFixedWidth(60)
+                    btn_del.clicked.connect(lambda checked=False, n=name, p=path: self._on_delete_publisher(n, p))
+                    row_layout.addWidget(btn_del)
                     item.setSizeHint(row.sizeHint())
                     self.list_widget.addItem(item)
                     self.list_widget.setItemWidget(item, row)
@@ -322,6 +366,81 @@ def open_project_publisher() -> None:
             win.raise_()
             win.activateWindow()
             _setup_windows.append(win)
+
+        def _on_delete_publisher(self, asset_name, asset_path):
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "Delete Publisher",
+                "Delete publish node '%s'?\nThis will permanently remove the DataAsset." % asset_name,
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            try:
+                success = unreal.EditorAssetLibrary.delete_asset(asset_path)
+                if success:
+                    unreal.log("Ftrack: Deleted publish node '%s'." % asset_name)
+                else:
+                    unreal.log_warning("Ftrack: Could not delete '%s' — asset may be in use." % asset_name)
+            except Exception as e:
+                unreal.log_error("Ftrack: Delete failed for '%s': %s" % (asset_name, e))
+            self._scan_publish_folder()
+
+        def _publish_asset(self, asset_path: str):
+            if not unreal:
+                return
+            try:
+                import camera_exporter
+            except ImportError as e:
+                unreal.log_error("Ftrack: Could not import camera_exporter: %s" % e)
+                return
+
+            export_dir = camera_exporter._get_export_dir()
+            total_exported = 0
+            total_skipped = 0
+
+            try:
+                asset = unreal.load_asset(asset_path)
+                if not asset:
+                    unreal.log_error("Ftrack Publish: Could not load asset: %s" % asset_path)
+                    return
+                components = list(asset.get_editor_property("Components") or [])
+                dirty = False
+                for c in components:
+                    try:
+                        name = c.get_editor_property("Name") or ""
+                        component_type = (c.get_editor_property("ComponentType") or "").strip().lower()
+                        if component_type != "camera":
+                            unreal.log_warning(
+                                "Ftrack Publish: '%s' (type: '%s') — only cameras supported, skipping."
+                                % (name.split(".")[-1], component_type or "unset")
+                            )
+                            total_skipped += 1
+                            continue
+                        meta = dict(c.get_editor_property("Metadata") or {})
+                        sequence_path = meta.get("sequence_path", "")
+                        actor_label = meta.get("actor_label", "")
+                        binding_guid = meta.get("binding_guid", "")
+                        export_path = camera_exporter.export_camera_from_sequence(
+                            name, export_dir, sequence_path=sequence_path,
+                            actor_label=actor_label, binding_guid=binding_guid
+                        )
+                        if export_path:
+                            c.set_editor_property("FilePath", export_path)
+                            dirty = True
+                            total_exported += 1
+                    except Exception as e:
+                        unreal.log_error("Ftrack Publish: Error on component '%s': %s" % (name, e))
+                if dirty:
+                    asset.set_editor_property("Components", components)
+                    unreal.EditorAssetLibrary.save_loaded_asset(asset)
+            except Exception as e:
+                unreal.log_error("Ftrack Publish: Error processing asset '%s': %s" % (asset_path, e))
+
+            unreal.log(
+                "Ftrack Publish: Done — %d exported, %d skipped." % (total_exported, total_skipped)
+            )
 
         def _on_create_publish_node(self):
             try:

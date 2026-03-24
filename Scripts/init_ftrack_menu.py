@@ -180,20 +180,18 @@ def import_paths_into_unreal(paths: list, content_subpath: str | None = None) ->
 
 def _open_project_publisher() -> None:
     """Open the Project Publisher window. Reloads publisher scripts on every call for live development."""
-    import importlib
     this_dir = os.path.dirname(os.path.abspath(__file__))
     if this_dir not in sys.path:
         sys.path.insert(0, this_dir)
-    # Reload publisher scripts so edits take effect without restarting Unreal.
-    # init_ftrack_menu and open_browser_inprocess are intentionally excluded:
-    # they register @unreal.uclass() entries that must not be re-registered mid-session.
-    for _mod in ("ftrack_out_handle", "project_publisher_ui"):
-        if _mod in sys.modules:
-            try:
-                importlib.reload(sys.modules[_mod])
-            except Exception as _e:
-                if unreal:
-                    unreal.log_warning("Ftrack: Could not reload %s: %s" % (_mod, _e))
+    # Force fresh import of publisher scripts on every open so edits take effect
+    # without restarting Unreal.  We pop from sys.modules entirely rather than
+    # using importlib.reload — reload can silently serve stale bytecode on this
+    # UE Python version.  The next `import <mod>` inside each function will then
+    # read the file from disk.
+    # init_ftrack_menu and open_browser_inprocess are excluded: they register
+    # @unreal.uclass() entries that must not be re-registered mid-session.
+    for _mod in ("ftrack_out_handle", "camera_exporter", "project_publisher_ui"):
+        sys.modules.pop(_mod, None)
     try:
         import project_publisher_ui
         project_publisher_ui.open_project_publisher()
