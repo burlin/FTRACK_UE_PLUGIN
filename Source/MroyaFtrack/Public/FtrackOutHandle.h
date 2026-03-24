@@ -1,16 +1,14 @@
 // Copyright Mroya. Ftrack Out Handle - passive PublishJob-shaped data for Publisher.execute().
-// Optional per-component: UE object link and scenario library index for external export scripts.
+// Optional per-component: UE object path string and scenario library index for external export scripts.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "UObject/Object.h"
-#include "UObject/SoftObjectPtr.h"
 #include "FtrackOutHandle.generated.h"
 
 /**
- * One publish component: mirrors ComponentData plus UE-only fields (source object, scenario index).
+ * One publish component: mirrors ComponentData plus UE-only fields (source object path, scenario index).
  */
 USTRUCT(BlueprintType)
 struct FFtrackPublishComponentEntry
@@ -53,9 +51,13 @@ struct FFtrackPublishComponentEntry
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Publish")
 	TMap<FString, FString> Metadata;
 
-	/** Optional: object in level/content used by external export scripts. Not sent to ftrack unless copied to Metadata. */
+	/**
+	 * Optional: path to the Unreal object to export (free-form string).
+	 * Examples: soft object path, sequencer binding path, subobject path (e.g. camera in a Level Sequence).
+	 * Not sent to ftrack unless copied to Metadata by the Python bridge.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Unreal")
-	TSoftObjectPtr<UObject> SourceObject;
+	FString SourceObjectPath;
 
 	/** Passive index into an external scenario library (resolved by pipeline Python, not by this asset). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Unreal")
