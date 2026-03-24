@@ -1,5 +1,5 @@
 // Copyright Mroya. Ftrack Out Handle - passive PublishJob-shaped data for Publisher.execute().
-// Optional per-component: UE object path string and scenario library index for external export scripts.
+// Optional per-component: UE object binding, scenario index. One playblast path per job (version), not per component.
 
 #pragma once
 
@@ -8,7 +8,33 @@
 #include "FtrackOutHandle.generated.h"
 
 /**
- * One publish component: mirrors ComponentData plus UE-only fields (source object path, scenario index).
+ * Resolves an object in the Unreal scene or content: sequence, actor, content root.
+ * Not serialized into the ftrack publish job; used by editor tools and export scripts for binding.
+ */
+USTRUCT(BlueprintType)
+struct FFtrackObjectBinding
+{
+	GENERATED_BODY()
+
+	/** Level Sequence or other asset path string (e.g. /Game/Shots/.../LS_shot.LS_shot). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Binding", meta = (DisplayName = "sequence_path"))
+	FString SequencePath;
+
+	/** Actor label in the sequence or level (e.g. bound actor name). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Binding", meta = (DisplayName = "actor_label"))
+	FString ActorLabel;
+
+	/** World actor or subobject path string (e.g. ...PersistentLevel.ActorName). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Binding", meta = (DisplayName = "actor_name"))
+	FString ActorName;
+
+	/** Content root or package path under /Game/ (pipeline-specific). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Binding", meta = (DisplayName = "content_path"))
+	FString ContentPath;
+};
+
+/**
+ * One publish component: mirrors ComponentData plus UE-only fields (object binding, scenario index).
  */
 USTRUCT(BlueprintType)
 struct FFtrackPublishComponentEntry
@@ -52,12 +78,11 @@ struct FFtrackPublishComponentEntry
 	TMap<FString, FString> Metadata;
 
 	/**
-	 * Optional: path to the Unreal object to export (free-form string).
-	 * Examples: soft object path, sequencer binding path, subobject path (e.g. camera in a Level Sequence).
-	 * Not sent to ftrack unless copied to Metadata by the Python bridge.
+	 * Pointer data for the object to bind in editor / export (sequencer, level, content).
+	 * Not passed to ftrack publish; read from the asset in Python/Blueprint when needed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Unreal")
-	FString SourceObjectPath;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Binding")
+	FFtrackObjectBinding ObjectBinding;
 
 	/** Passive index into an external scenario library (resolved by pipeline Python, not by this asset). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Unreal")
@@ -89,17 +114,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job")
 	FString AssetType;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job", meta = (MultiLine = true))
 	FString Comment;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job")
 	FString ThumbnailPath;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job")
-	FString SourceDcc;
+	/** Enable the job-level playblast component (not duplicated per file component). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job", meta = (DisplayName = "use_playblast"))
+	bool bUsePlayblast = false;
+
+	/**
+	 * Single preview video path for this publish (one per AssetVersion). Shown only when use_playblast is on.
+	 * If bUsePlayblast is true, the bridge adds one ComponentData (component_type=playblast) for encode_media.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job", meta = (DisplayName = "playblast_path", EditCondition = "bUsePlayblast", EditConditionHides))
+	FString PlayblastPath;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job")
-	FString SourceScene;
+	FString SourceDcc = TEXT("unreal");
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Ftrack|Job")
 	FString TransferTargetLocation;

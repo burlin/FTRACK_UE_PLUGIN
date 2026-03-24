@@ -2,8 +2,15 @@
 """
 Ftrack Out Handle: read UFtrackOutHandle into a dict for PublishJob.from_dict / Publisher.execute.
 
-UE-only fields (SourceObjectPath, ScenarioLibraryIndex) are omitted from the dict by default;
-set include_unreal_metadata=True to add optional keys under metadata for tracing.
+Object binding (ObjectBinding: sequence_path, actor_label, actor_name, content_path) is editor-side
+pointer data and is never merged into the publish job; use component_object_binding_dict() to read it.
+
+Playblast is job-level (one per version): bUsePlayblast and PlayblastPath live on the handle asset. When set,
+out_handle_to_publish_job_dict appends a single component (name=playblast, component_type=playblast), same as
+ftrack_inout JobBuilder.
+
+Optional scenario keys: include_unreal_metadata=True adds scenario index/description into the main
+component Metadata only (not playblast; playblast is never metadata).
 """
 
 from __future__ import annotations
@@ -33,6 +40,32 @@ def _get_prop(obj: Any, *names: str) -> Any:
     return None
 
 
+def _binding_str(raw: Any) -> str:
+    """Normalize FString or legacy path structs from Unreal Python to a plain string."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        s = raw.strip()
+        return s if s and s != "None" else ""
+    for attr in ("to_string", "get_asset_path_string", "path_string"):
+        if hasattr(raw, attr):
+            try:
+                s = getattr(raw, attr)()
+                if s is not None:
+                    out = str(s).strip()
+                    if out and out != "None":
+                        return out
+            except Exception:
+                pass
+    try:
+        s = str(raw).strip()
+        if s and s != "None":
+            return s
+    except Exception:
+        pass
+    return ""
+
+
 def _fstring_map_to_dict(raw: Any) -> Dict[str, str]:
     if not raw:
         return {}
@@ -45,23 +78,6 @@ def _fstring_map_to_dict(raw: Any) -> Dict[str, str]:
     except Exception:
         pass
     return out
-
-
-def _soft_object_to_path_str(raw: Any) -> str:
-    if raw is None:
-        return ""
-    try:
-        if hasattr(raw, "get_asset_name") and hasattr(raw, "get_long_package_name"):
-            return raw.get_path_name()
-    except Exception:
-        pass
-    try:
-        s = str(raw)
-        if s and s != "None":
-            return s
-    except Exception:
-        pass
-    return ""
 
 
 def _entry_to_component_dict(
@@ -104,13 +120,6 @@ def _entry_to_component_dict(
         desc = (_get_prop(entry, "ScenarioDescription", "scenario_description") or "").strip()
         if desc:
             meta.setdefault("scenario_description", desc)
-        path_str = (_get_prop(entry, "SourceObjectPath", "source_object_path") or "").strip()
-        if not path_str:
-            # Backward compatibility: older assets used TSoftObjectPtr SourceObject
-            src = _get_prop(entry, "SourceObject", "source_object")
-            path_str = _soft_object_to_path_str(src)
-        if path_str:
-            meta.setdefault("unreal_source_object", path_str)
 
     comp: Dict[str, Any] = {
         "name": str(name),
@@ -125,6 +134,58 @@ def _entry_to_component_dict(
     return comp
 
 
+def _playblast_component_dict(file_path: str) -> Dict[str, Any]:
+    """Single playblast component per PublishJob for encode_media; not merged into Metadata."""
+    return {
+        "name": "playblast",
+        "file_path": file_path,
+        "component_type": "playblast",
+        "export_enabled": True,
+        "metadata": {},
+        "sequence_pattern": None,
+        "frame_range": None,
+        "transfer_after_publish": False,
+    }
+
+
+def component_object_binding_dict(entry: Any) -> Dict[str, str]:
+    """
+    Read FFtrackObjectBinding from one component entry.
+
+    This is Unreal-side pointer data for tools and export scripts; it is not part of the ftrack
+    publish job dict.
+    """
+    binding = _get_prop(entry, "ObjectBinding", "object_binding")
+    if not binding:
+        return {}
+    return {
+        "sequence_path": _binding_str(_get_prop(binding, "SequencePath", "sequence_path")),
+        "actor_label": _binding_str(_get_prop(binding, "ActorLabel", "actor_label")),
+        "actor_name": _binding_str(_get_prop(binding, "ActorName", "actor_name")),
+        "content_path": _binding_str(_get_prop(binding, "ContentPath", "content_path")),
+    }
+
+
+def out_handle_component_bindings(handle: Any) -> List[Dict[str, str]]:
+    """
+    Return object binding dicts for each component on the handle (same order as Components array).
+    """
+    if unreal is None:
+        raise RuntimeError("unreal module is not available (run inside Unreal Editor).")
+    asset = handle
+    if isinstance(handle, str):
+        asset = unreal.load_asset(handle)
+    if not asset:
+        raise ValueError("Could not load Ftrack Out Handle asset.")
+    raw = _get_prop(asset, "Components", "components")
+    out: List[Dict[str, str]] = []
+    if not raw:
+        return out
+    for entry in raw:
+        out.append(component_object_binding_dict(entry))
+    return out
+
+
 def out_handle_to_publish_job_dict(
     handle: Any,
     *,
@@ -136,7 +197,7 @@ def out_handle_to_publish_job_dict(
 
     Args:
         handle: Loaded UFtrackOutHandle UObject, or asset path string.
-        include_unreal_metadata: If True, push scenario index / source object path into component metadata.
+        include_unreal_metadata: If True, push scenario index/description into the main component metadata.
         merge_frame_into_metadata: If True and frame range is set, add start_frame/end_frame to metadata.
     """
     if unreal is None:
@@ -153,8 +214,9 @@ def out_handle_to_publish_job_dict(
     asset_type = (_get_prop(asset, "AssetType", "asset_type") or "").strip() or None
     comment = (_get_prop(asset, "Comment", "comment") or "").strip()
     thumbnail_path = (_get_prop(asset, "ThumbnailPath", "thumbnail_path") or "").strip() or None
+    use_pb = _get_prop(asset, "bUsePlayblast", "use_playblast")
+    pb_path = (_get_prop(asset, "PlayblastPath", "playblast_path") or "").strip()
     source_dcc = (_get_prop(asset, "SourceDcc", "source_dcc") or "unreal").strip() or "unreal"
-    source_scene = (_get_prop(asset, "SourceScene", "source_scene") or "").strip() or None
     transfer_loc = (_get_prop(asset, "TransferTargetLocation", "transfer_target_location") or "").strip() or None
 
     raw_components = _get_prop(asset, "Components", "components")
@@ -168,6 +230,8 @@ def out_handle_to_publish_job_dict(
                     merge_frame_into_metadata=merge_frame_into_metadata,
                 )
             )
+    if bool(use_pb) and pb_path:
+        components.append(_playblast_component_dict(pb_path))
 
     job: Dict[str, Any] = {
         "task_id": task_id,
@@ -178,7 +242,6 @@ def out_handle_to_publish_job_dict(
         "components": components,
         "thumbnail_path": thumbnail_path,
         "source_dcc": source_dcc,
-        "source_scene": source_scene,
         "transfer_target_location": transfer_loc,
     }
     return job
