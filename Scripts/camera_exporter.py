@@ -243,9 +243,105 @@ def _find_sequence_and_binding_by_scan(actor_name: str, world):
     return None, None
 
 
+def _bake_transform_manual(world, level_sequence, camera_binding, start_frame, end_frame):
+    """
+    Scrub the sequencer frame-by-frame, capture the camera actor's world-space
+    transform at each frame, then write explicit linear keyframes into the
+    binding's MovieScene3DTransformTrack.  Replaces SequencerTools.bake_transform
+    which was removed in UE 5.3+.
+    """
+    seq_lib = unreal.LevelSequenceEditorBlueprintLibrary
+    camera_name = camera_binding.get_name()
+
+    # Make sure the sequence is open in the editor so spawnables are live
+    try:
+        seq_lib.open_level_sequence(level_sequence)
+    except AttributeError:
+        try:
+            unreal.get_editor_subsystem(
+                unreal.AssetEditorSubsystem
+            ).open_editor_for_assets([level_sequence])
+        except Exception:
+            pass
+
+    # Capture world transform at every frame by scrubbing the playhead
+    baked = {}
+    for frame in range(start_frame, end_frame + 1):
+        try:
+            seq_lib.set_current_time(float(frame))
+        except Exception as e:
+            unreal.log_warning("Ftrack Bake: set_current_time(%d) failed: %s" % (frame, e))
+            continue
+
+        try:
+            sub = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
+            actors = sub.get_all_level_actors() or []
+        except Exception:
+            actors = unreal.EditorLevelLibrary.get_all_level_actors() or []
+
+        for actor in actors:
+            try:
+                if actor.get_actor_label() == camera_name:
+                    baked[frame] = actor.get_actor_transform()
+                    break
+            except Exception:
+                pass
+
+    if not baked:
+        unreal.log_warning(
+            "Ftrack Export: Manual bake captured no frames for '%s'. "
+            "Open the camera sub-sequence in the Sequencer before publishing." % camera_name
+        )
+        return
+
+    # Find or create the 3D transform track on this binding
+    xform_track = None
+    for track in (camera_binding.get_tracks() or []):
+        if isinstance(track, unreal.MovieScene3DTransformTrack):
+            xform_track = track
+            break
+    if xform_track is None:
+        xform_track = camera_binding.add_track(unreal.MovieScene3DTransformTrack)
+
+    # Replace any existing sections with a single freshly-baked section
+    for sec in list(xform_track.get_sections() or []):
+        xform_track.remove_section(sec)
+    section = xform_track.add_section()
+    section.set_range(start_frame, end_frame + 1)
+
+    # Float channels are ordered: TX TY TZ  RX RY RZ  SX SY SZ
+    channels = section.get_channels_by_type(unreal.MovieSceneScriptingFloatChannel)
+    if len(channels) < 9:
+        unreal.log_warning(
+            "Ftrack Export: Transform section has %d channels (expected 9) — bake may be incomplete."
+            % len(channels)
+        )
+
+    for frame, xform in sorted(baked.items()):
+        t = xform.translation
+        r = xform.rotation.euler()   # FRotator: roll, pitch, yaw
+        s = xform.scale3d
+        vals = [t.x, t.y, t.z, r.roll, r.pitch, r.yaw, s.x, s.y, s.z]
+        fn = unreal.FrameNumber(frame)
+        for i, ch in enumerate(channels[: len(vals)]):
+            try:
+                ch.add_key(
+                    fn, vals[i], 0.0,
+                    unreal.SequenceTimeUnit.DISPLAY_RATE,
+                    unreal.MovieSceneKeyInterpolation.LINEAR,
+                )
+            except Exception as e:
+                unreal.log_warning(
+                    "Ftrack Bake: ch%d frame %d: %s" % (i, frame, e)
+                )
+
+    unreal.log(
+        "Ftrack Export: Baked %d frames for '%s'." % (len(baked), camera_name)
+    )
+
+
 def _bake_transform(world, level_sequence, camera_binding, start_frame, end_frame):
-    """Bake camera transform keys. Tries known UE5 API variants; logs and continues on failure."""
-    # UE 5.0-5.2: SequencerTools.bake_transform exists
+    """Bake camera transform keys. Uses native API when available, manual scrub otherwise."""
     if hasattr(unreal.SequencerTools, "bake_transform"):
         try:
             bake_settings = unreal.BakingAnimationKeySettings()
@@ -256,12 +352,10 @@ def _bake_transform(world, level_sequence, camera_binding, start_frame, end_fram
             )
             return
         except Exception as e:
-            unreal.log_warning("Ftrack Export: bake_transform failed: %s" % e)
-    else:
-        unreal.log_warning(
-            "Ftrack Export: SequencerTools.bake_transform not available in this UE version — "
-            "exporting existing keys as-is."
-        )
+            unreal.log_warning("Ftrack Export: bake_transform failed: %s — falling back to manual bake." % e)
+
+    # UE 5.3+: manual frame-by-frame bake
+    _bake_transform_manual(world, level_sequence, camera_binding, start_frame, end_frame)
 
 
 def _export_fbx(world, level_sequence, camera_binding, export_path: str) -> bool:
