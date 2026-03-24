@@ -183,12 +183,11 @@ def open_project_publisher() -> None:
                 actor_label = actor.get_actor_label()
                 label = "%s  (%s)" % (actor_label, type(actor).__name__)
                 is_camera = cine_cam_cls and isinstance(actor, cine_cam_cls)
-                component_type = "camera" if is_camera else ""
-                cam_label = actor_label if is_camera else ""
-                # For cameras, record the sequencer binding GUID so export can
-                # find the binding by stable ID rather than by name.
+                component_type = "camera" if is_camera else "animation"
+                # Record the sequencer binding GUID so export can find the binding
+                # by stable ID rather than by name.
                 binding_guid = ""
-                if is_camera and seq:
+                if seq:
                     try:
                         for b in (seq.get_bindings() or []):
                             if b.get_name() == actor_label:
@@ -197,7 +196,7 @@ def open_project_publisher() -> None:
                                 break
                     except Exception:
                         pass
-                if self._write_component_to_asset(object_id, component_type=component_type, sequence_path=seq_path, actor_label=cam_label, binding_guid=binding_guid):
+                if self._write_component_to_asset(object_id, component_type=component_type, sequence_path=seq_path, actor_label=actor_label, binding_guid=binding_guid):
                     self._add_marked_item(label, object_id)
                     added += 1
 
@@ -411,9 +410,9 @@ def open_project_publisher() -> None:
                     try:
                         name = c.get_editor_property("Name") or ""
                         component_type = (c.get_editor_property("ComponentType") or "").strip().lower()
-                        if component_type != "camera":
+                        if component_type not in ("camera", "animation"):
                             unreal.log_warning(
-                                "Ftrack Publish: '%s' (type: '%s') — only cameras supported, skipping."
+                                "Ftrack Publish: '%s' (type: '%s') — unsupported type, skipping."
                                 % (name.split(".")[-1], component_type or "unset")
                             )
                             total_skipped += 1
@@ -422,7 +421,7 @@ def open_project_publisher() -> None:
                         sequence_path = meta.get("sequence_path", "")
                         actor_label = meta.get("actor_label", "")
                         binding_guid = meta.get("binding_guid", "")
-                        export_path = camera_exporter.export_camera_from_sequence(
+                        export_path = camera_exporter.export_binding_from_sequence(
                             name, export_dir, sequence_path=sequence_path,
                             actor_label=actor_label, binding_guid=binding_guid
                         )

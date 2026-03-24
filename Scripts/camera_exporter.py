@@ -411,7 +411,7 @@ def _export_fbx(world, level_sequence, camera_binding, export_path: str) -> bool
     return False
 
 
-def export_camera_from_sequence(
+def export_binding_from_sequence(
     actor_path: str,
     export_dir: str | None = None,
     sequence_path: str = "",
@@ -419,10 +419,10 @@ def export_camera_from_sequence(
     binding_guid: str = "",
 ) -> str | None:
     """
-    Bake and export the CineCameraActor at actor_path to FBX.
+    Bake and export any sequencer binding (camera, animation, etc.) to FBX.
 
     Args:
-        actor_path:    UE object path of the CineCameraActor.
+        actor_path:    UE object path of the actor.
         export_dir:    Absolute filesystem directory. Defaults to <ProjectContent>/Export.
         sequence_path: UE object path of the owning LevelSequence, recorded at mark time.
         actor_label:   Actor display label, used for logging and name-based fallback.
@@ -522,12 +522,16 @@ def export_camera_from_sequence(
             return None
 
         if os.path.isfile(export_path):
-            unreal.log("Ftrack Export: Camera exported -> %s" % export_path)
+            unreal.log("Ftrack Export: Exported -> %s" % export_path)
             return export_path
         else:
             unreal.log_error("Ftrack Export: Export ran but file not found at: %s" % export_path)
             return None
 
     except Exception as e:
-        unreal.log_error("Ftrack Export: Camera export failed: %s" % e)
+        unreal.log_error("Ftrack Export: Export failed: %s" % e)
         return None
+
+
+# Backward-compatibility alias
+export_camera_from_sequence = export_binding_from_sequence
