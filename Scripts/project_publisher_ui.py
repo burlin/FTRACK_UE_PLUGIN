@@ -347,6 +347,10 @@ def open_project_publisher() -> None:
                     btn_pub.setFixedWidth(70)
                     btn_pub.clicked.connect(lambda checked=False, p=path: self._publish_asset(p))
                     row_layout.addWidget(btn_pub)
+                    btn_ren = QtWidgets.QPushButton("Rename")
+                    btn_ren.setFixedWidth(70)
+                    btn_ren.clicked.connect(lambda checked=False, n=name, p=path: self._on_rename_publisher(n, p))
+                    row_layout.addWidget(btn_ren)
                     btn_del = QtWidgets.QPushButton("Delete")
                     btn_del.setFixedWidth(60)
                     btn_del.clicked.connect(lambda checked=False, n=name, p=path: self._on_delete_publisher(n, p))
@@ -365,6 +369,26 @@ def open_project_publisher() -> None:
             win.raise_()
             win.activateWindow()
             _setup_windows.append(win)
+
+        def _on_rename_publisher(self, asset_name, asset_path):
+            new_name, ok = QtWidgets.QInputDialog.getText(
+                self, "Rename Handle", "New name:", text=asset_name
+            )
+            if not ok or not new_name.strip() or new_name.strip() == asset_name:
+                return
+            new_name = new_name.strip()
+            try:
+                # Build new asset path: same package folder, new asset name
+                package_path = asset_path.rsplit("/", 1)[0]
+                new_asset_path = "%s/%s.%s" % (package_path, new_name, new_name)
+                success = unreal.EditorAssetLibrary.rename_asset(asset_path, new_asset_path)
+                if success:
+                    unreal.log("Ftrack: Renamed '%s' -> '%s'." % (asset_name, new_name))
+                else:
+                    unreal.log_warning("Ftrack: Could not rename '%s' — asset may be in use." % asset_name)
+            except Exception as e:
+                unreal.log_error("Ftrack: Rename failed for '%s': %s" % (asset_name, e))
+            self._scan_publish_folder()
 
         def _on_delete_publisher(self, asset_name, asset_path):
             reply = QtWidgets.QMessageBox.question(
